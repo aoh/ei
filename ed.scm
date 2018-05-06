@@ -271,6 +271,15 @@
                (ed es env u d l)))
          (print "bye"))))
 
+(define (forward-read ll)
+   (if (pair? ll)
+      (forward-read (cdr ll))
+      ll))
+
+(define (syntax-error-handler recurse ll message)
+   (print-to stderr (str "?"))
+   (recurse (forward-read ll)))
+
 (define (start-ed dict args)
    (cond
       ((getf dict 'about) 
@@ -285,7 +294,7 @@
          0)
       (else
          (ed 
-            (λ () (fd->exp-stream stdin get-command (λ x x)))
+            (λ () (fd->exp-stream stdin get-command syntax-error-handler))
             dict null null 0))))
 
 (define (main args)
