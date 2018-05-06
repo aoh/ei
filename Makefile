@@ -1,7 +1,7 @@
 ed: ed.c
 	cc -O2 -o ed ed.c
 
-ed.c: ed.scm tmp/owl-lisp/bin/vm
+ed.c: ed.scm tmp/owl-lisp/bin/ol
 	tmp/owl-lisp/bin/ol -o ed.c ed.scm
 
 tmp/owl-lisp:
