@@ -6,6 +6,7 @@
 
 (import
    (owl parse)
+   (owl unicode)
    (owl args))
 
 (define version "0.1a")
@@ -45,6 +46,17 @@
           (rs (upto-dot-line)))
          (cons r rs))))
 
+(define get-non-newline
+   (get-rune-if
+      (λ (x) (not (eq? x #\newline)))))
+
+(define get-same-line-whitespace
+   (get-rune-if
+      (λ (x)
+         (or (eq? x #\tab)
+             (eq? x #\return)
+             (eq? x #\space)))))
+ 
 (define (get-action range)
    (any
       (let-parses
@@ -62,9 +74,33 @@
           ((skip (imm #\n)))
           (tuple 'print range #t))
       (let-parses
-          ((skip (either (imm #\p) (imm #\newline)))) ; default op is print
+         ((skip (imm #\d)))
+         (tuple 'delete range))
+      (let-parses
+         ((skip (imm #\P))
+          (prompt (plus get-non-newline)))
+         (tuple 'prompt (list->string prompt)))
+      (let-parses
+         ((skip (imm #\w))
+          (skip (star get-same-line-whitespace))
+          (path (star get-non-newline))) ;; empty = last
+         (tuple 'write range (list->string path)))
+      (let-parses
+          ((skip (imm #\p)))
           (tuple 'print range #f))
-       ))
+      (let-parses
+         ((skip (imm #\k))
+          (tag get-rune))
+         (tuple 'mark tag))
+      (let-parses
+         ((skip (imm #\Q)))
+         (tuple 'quit #true))
+      (let-parses
+         ((skip (imm #\newline)))
+         (tuple 'print 
+            (if (eq? range 'default)
+               (tuple 'plus 'dot 1) ;; blank command = +1
+               range) #false))))
  
 (define get-digit
    (get-byte-if
@@ -104,12 +140,29 @@
        (id get-rune))
       (tuple 'mark id)))
 
-(define get-position
+(define get-leaf-position
    (any
       get-natural
       get-special-place
       get-mark
       (get-epsilon 'default)))
+
+(define (ival byte x)
+   (let-parses
+      ((skip (imm byte)))
+      x))
+         
+(define get-position
+   (let-parses
+      ((a get-leaf-position)
+       (val
+         (either
+            (let-parses
+               ((op (either (ival #\+ 'plus) (ival #\- 'minus)))
+                (arg get-leaf-position))
+               (tuple op a arg))
+            (epsilon a))))
+      val))
 
 (define get-range
    (either
@@ -147,6 +200,13 @@
 (define usage-text 
    "Usage: ed [args] [path]")
 
+(define (add-mark env tag pos)
+   (put env 'marks
+      (put (get env 'marks #empty) tag pos)))
+
+(define (get-mark env tag)
+   (get (get env 'marks #empty) tag #false))
+
 (define (eval-position env u d l exp default)
    (cond
       ((number? exp) exp)
@@ -155,6 +215,23 @@
       ((eq? exp 'end) (+ l (length d)))
       ((eq? exp 'default)
          (eval-position env u d l default default))
+      ((tuple? exp)
+         (tuple-case exp
+            ((mark tag)
+               (get-mark env tag))
+            ((plus a b)
+               (lets ((a (eval-position env u d l a default))
+                      (b (eval-position env u d l b 0)))
+                  (if (and a b)
+                     (+ a b)
+                     #false)))
+            ((minus a b)
+               (lets ((a (eval-position env u d l a default))
+                      (b (eval-position env u d l b 0)))
+                  (if (and a b)
+                     (- a b)
+                     #false)))
+            (else #false)))
       (else
          #false)))
 
@@ -229,8 +306,10 @@
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
    (maybe-prompt env)
+   (if (not (= (length u) l))
+      (print "BUG: position off sync"))
    (lets ((a es (uncons es #f)))
-      ;(print-to stderr a)
+      ; (print-to stderr a)
       (if a
          (tuple-case a
             ((append pos data)
@@ -256,6 +335,8 @@
                (lets ((pos (eval-position env u d l range 'dot)))
                   (print pos)
                   (ed es env u d l)))
+            ((quit force?)
+               0)
             ((print range number?)
                (lets ((from to (eval-range env u d l range 'dot)))
                   (if (valid-range? from to l (λ () (+ l (length d))))
@@ -266,10 +347,45 @@
                      (begin
                         (print-to stderr "?")
                         (ed es env u d l)))))
+            ((delete range)
+               (print "deleting " range)
+               (lets ((from to (eval-range env u d l range 'dot)))
+                  (if (valid-range? from to l (λ () (+ l (length d))))
+                     (lets
+                        ((env (put env 'undo (tuple u d l)))
+                         (u d l (seek-line u d l from))
+                         (u (cdr u))
+                         (l (- l 1))
+                         (d (drop d (- to from))))
+                        (if (null? d)
+                           (ed es env u d l)
+                           (ed es env (cons (car d) u) (cdr d) (+ l 1))))
+                     (begin
+                        (print-to stderr "?")
+                        (ed es env u d l)))))
+            ((prompt pt)
+               (ed es (put env 'prompt pt) u d l))
+            ((write range path)
+               (lets
+                  ((lines (append (reverse u) d)) ;; ignore range for now
+                   (runes (foldr (λ (line out) (append line (cons #\newline out))) null lines))
+                   (bytes (utf8-encode runes))
+                   (path (if (equal? path "") (getf env 'path) path))
+                   (port (maybe open-output-file path)))
+                  (if (not (and port (write-bytes port bytes)))
+                     (begin
+                        (print-to stderr "?")
+                        (ed es env u d l))
+                     (begin
+                        (print (length bytes))
+                        (ed es 
+                           (put env 'path path)
+                           u d l)))))
+            ((mark tag)
+               (ed es (add-mark env tag l) u d l))
             (else
                (print-to stderr "?!")
-               (ed es env u d l)))
-         (print "bye"))))
+               (ed es env u d l))))))
 
 (define (forward-read ll)
    (if (pair? ll)
