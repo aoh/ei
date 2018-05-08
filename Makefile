@@ -1,3 +1,9 @@
+everything: ed
+	# compare against reference ed if available
+	-test -x /bin/ed && test/run ed
+	# test this ed
+	test/run ./ed
+
 ed: ed.c
 	cc -O2 -o ed ed.c
 

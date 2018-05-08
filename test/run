@@ -1,0 +1,21 @@
+#!/bin/sh
+
+INFO=$($@ --version | head -n 1)
+
+fail() {
+   echo "FAILURE: $INFO is not a standard editor: $@"
+   exit 1
+}
+
+echo  "Running tests:"
+for TEST in test/*.ed
+do
+   echo " - $TEST:\c"
+   $@ < $TEST >/dev/null 2>&1
+   test -f out || fail "No out file from $TEST"
+   diff out $TEST.ok || fail "Test failed: $TEST"
+   rm out
+   echo " ok"
+done
+
+echo "$INFO is a standard editor."

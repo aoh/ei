@@ -31,7 +31,7 @@
       comment "optional prompt")
    ))
 
-(define command-line-rules 
+(define command-line-rules
    (cl-rules command-line-rule-exp))
 
 (define (upto-dot-line)
@@ -56,7 +56,7 @@
          (or (eq? x #\tab)
              (eq? x #\return)
              (eq? x #\space)))))
- 
+
 (define (get-action range)
    (any
       (let-parses
@@ -86,22 +86,36 @@
           (path (star get-non-newline))) ;; empty = last
          (tuple 'write range (list->string path)))
       (let-parses
+         ((skip (imm #\e))
+          (skip (star get-same-line-whitespace))
+          (path (star get-non-newline))) ;; empty = last
+         (tuple 'edit (list->string path)))
+      (let-parses
+         ((skip (imm #\f))
+          (skip (star get-same-line-whitespace))
+          (path (star get-non-newline)))
+         (tuple 'file (if (null? path) #false (list->string path))))
+      (let-parses
           ((skip (imm #\p)))
           (tuple 'print range #f))
       (let-parses
          ((skip (imm #\k))
           (tag get-rune))
-         (tuple 'mark tag))
+         (tuple 'mark range tag))
       (let-parses
          ((skip (imm #\Q)))
          (tuple 'quit #true))
       (let-parses
+         ((skip (imm #\j))
+          (joiner (star get-non-newline))) ;; extra feature
+         (tuple 'join range joiner))
+      (let-parses
          ((skip (imm #\newline)))
-         (tuple 'print 
+         (tuple 'print
             (if (eq? range 'default)
                (tuple 'plus 'dot 1) ;; blank command = +1
                range) #false))))
- 
+
 (define get-digit
    (get-byte-if
       (λ (x) (<= #\0 x #\9))))
@@ -114,7 +128,7 @@
          0 digits)))
 
 (define special-positions
-   (list->ff 
+   (list->ff
       '((#\. . dot)
         (#\$ . end))))
 
@@ -123,7 +137,7 @@
       (list
          (cons #\% (tuple 'range 'start 'end))
          (cons #\; (tuple 'range 'dot 'end)))))
-        
+
 (define get-special-place
    (let-parses
       ((b (get-byte-if (λ (x) (special-positions x #f)))))
@@ -151,7 +165,7 @@
    (let-parses
       ((skip (imm byte)))
       x))
-         
+
 (define get-position
    (let-parses
       ((a get-leaf-position)
@@ -168,7 +182,7 @@
    (either
       (let-parses
          ((start get-position)
-          (end 
+          (end
              (either
                (let-parses
                   ((skip (get-imm #\,))
@@ -184,20 +198,20 @@
    (get-byte-if
       (λ (x) (or (eq? x #\newline)
                  (eq? x #\space)))))
-     
+
 (define maybe-whitespace
    (let-parses
       ((skip (star get-whitespace)))
       'whitespace))
 
-(define get-command 
+(define get-command
    (let-parses
       ((skip maybe-whitespace)
        (range get-range)
        (action (get-action range)))
       action))
 
-(define usage-text 
+(define usage-text
    "Usage: ed [args] [path]")
 
 (define (add-mark env tag pos)
@@ -221,13 +235,13 @@
                (get-mark env tag))
             ((plus a b)
                (lets ((a (eval-position env u d l a default))
-                      (b (eval-position env u d l b 0)))
+                      (b (eval-position env u d l b 1)))
                   (if (and a b)
                      (+ a b)
                      #false)))
             ((minus a b)
                (lets ((a (eval-position env u d l a default))
-                      (b (eval-position env u d l b 0)))
+                      (b (eval-position env u d l b 1)))
                   (if (and a b)
                      (- a b)
                      #false)))
@@ -303,6 +317,17 @@
       (if prompt
          (display prompt))))
 
+(define (join-lines u d n delim)
+   (if (= n 0)
+      (values u d)
+      (join-lines
+         (cons
+            (append (car u) delim (car d))
+            (cdr u))
+         (cdr d)
+         (- n 1)
+         delim)))
+
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
    (maybe-prompt env)
@@ -316,7 +341,7 @@
                (if (null? data)
                   (ed es env u d l)
                   (lets ((lines (cut data #\newline)))
-                     (ed es 
+                     (ed es
                         (put env 'undo (tuple u d l))
                         (append (reverse lines) u)
                         d
@@ -343,6 +368,17 @@
                      (lets
                         ((u d l (seek-line u d l from))
                          (u d l (print-range env u d l to number?)))
+                        (ed es env u d l))
+                     (begin
+                        (print-to stderr "?")
+                        (ed es env u d l)))))
+            ((join range delim)
+               (lets ((from to (eval-range env u d l range (tuple 'range 'dot (tuple 'plus 'dot 1)))))
+                  (if (valid-range? from to l (λ () (+ l (length d))))
+                     (lets
+                        ((u d l (seek-line u d l from))
+                         (env (put env 'undo (tuple u d l)))
+                         (u d (join-lines u d (- to from) delim)))
                         (ed es env u d l))
                      (begin
                         (print-to stderr "?")
@@ -378,11 +414,40 @@
                         (ed es env u d l))
                      (begin
                         (print (length bytes))
-                        (ed es 
+                        (ed es
                            (put env 'path path)
                            u d l)))))
-            ((mark tag)
-               (ed es (add-mark env tag l) u d l))
+            ((edit path)
+               (if-lets
+                  ((path (if (equal? path "") (getf env 'path) path))
+                   (data (file->list path))
+                   (nbytes (length data))
+                   (runes (utf8-decode data)) ;; mandatory for now
+                   (lines (cut runes #\newline))
+                   (nlines (length lines)))
+                  (begin
+                     (print nbytes)
+                     (ed es
+                        (put env 'path path)
+                        (reverse lines)
+                        null
+                        nlines))
+                  (begin
+                     (print-to stderr "?")
+                     (ed es env u d l))))
+            ((mark pos tag)
+               (lets ((pos (eval-position env u d l pos 'dot)))
+                  (if pos
+                     (ed es (add-mark env tag pos) u d l)
+                     (begin
+                        (print "?")
+                        (ed es env u d l)))))
+            ((file path)
+               (lets
+                   ((env (if path (put env 'path path) env))
+                    (file (get env 'path "?")))
+                   (print file)
+                   (ed es env u d l)))
             (else
                (print-to stderr "?!")
                (ed es env u d l))))))
@@ -398,7 +463,7 @@
 
 (define (start-ed dict args)
    (cond
-      ((getf dict 'about) 
+      ((getf dict 'about)
          (print "about what")
          0)
       ((getf dict 'version)
@@ -409,7 +474,7 @@
          (print (format-rules command-line-rules))
          0)
       (else
-         (ed 
+         (ed
             (λ () (fd->exp-stream stdin get-command syntax-error-handler))
             dict null null 0))))
 
