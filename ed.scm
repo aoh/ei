@@ -58,7 +58,7 @@
              (eq? x #\space)))))
 
 (define (get-action range)
-   (any
+   (one-of
       (let-parses
          ((skip (imm #\a))
           (skip (imm #\newline))
@@ -155,7 +155,7 @@
       (tuple 'mark id)))
 
 (define get-leaf-position
-   (any
+   (one-of
       get-natural
       get-special-place
       get-mark
