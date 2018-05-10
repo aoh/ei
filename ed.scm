@@ -34,16 +34,16 @@
 (define command-line-rules
    (cl-rules command-line-rule-exp))
 
-(define (upto-dot-line)
+(define (upto-line delim)
    (either
       (let-parses
          ((skip (imm #\newline))
-          (skip (imm #\.))
+          (skip (word delim null))
           (skip (imm #\newline)))
          null)
       (let-parses
          ((r rune)
-          (rs (upto-dot-line)))
+          (rs (upto-line delim)))
          (cons r rs))))
 
 (define get-non-newline
@@ -61,8 +61,9 @@
    (one-of
       (let-parses
          ((skip (imm #\a))
+          (delim (star get-non-newline)) ;; optional alternative delimiting line
           (skip (imm #\newline))
-          (cs (upto-dot-line)))
+          (cs (upto-line (list->string (if (null? delim) (list #\.) delim)))))
          (tuple 'append range cs))
       (let-parses
          ((skip (imm #\u)))
@@ -78,8 +79,11 @@
          (tuple 'delete range))
       (let-parses
          ((skip (imm #\P))
-          (prompt (plus get-non-newline)))
-         (tuple 'prompt (list->string prompt)))
+          (prompt (star get-non-newline))) ;; optional multi-character prompt support!
+         (tuple 'prompt 
+            (if (null? prompt)
+               "*"
+               (list->string prompt))))
       (let-parses
          ((skip (imm #\w))
           (skip (star get-same-line-whitespace))

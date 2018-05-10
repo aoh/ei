@@ -8,7 +8,7 @@ fail() {
 }
 
 echo  "Running tests:"
-for TEST in test/*.ed
+for TEST in test/*.e[di]
 do
    echo " - $TEST:\c"
    $@ < $TEST >/dev/null 2>&1
@@ -18,4 +18,4 @@ do
    echo " ok"
 done
 
-echo "$INFO is a standard editor."
+echo "$@ is a standard editor."
