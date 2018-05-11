@@ -355,9 +355,9 @@
              (cutd d (split d (- to from)))
              (cutd (cons this cutd)))
             (if (null? d)
-               (values u d l cutd)
-               (values (cons (car d) u) (cdr d) (+ l 1) cutd)))
-         (values u d l #f))))
+               (values u d l cutd #t)
+               (values (cons (car d) u) (cdr d) (+ l 1) cutd #f)))
+         (values u d l #f #f))))
 
 ;; u' d' l' | #f #f #f
 (define (buff-seek-line env u d l pos default)
@@ -376,6 +376,12 @@
       d
       (+ l (length lines))))
 
+;; move temporarily up, allowing 0 line
+(define (move-up u d l)
+   (if (null? u)
+      (values u d l)
+      (values (cdr u) (cons (car u) d) (- l 1))))
+   
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
    (maybe-prompt env)
@@ -396,10 +402,23 @@
                      (ed es env u d l))))
             ((change range data)
                (if-lets
-                  ((up dp lp cutd (buff-cut-range env u d l range))
-                   (lines (cut data #\newline))
-                   (up dp lp (buff-append up dp lp lines)))
-                  (ed es (put env 'undo (tuple u d l)) up dp lp)
+                  ((up dp lp cutd fini (buff-cut-range env u d l range)))
+                  (lets ((lines (cut data #\newline))
+                         (env (put env 'undo (tuple u d l)))
+                         (env (put env 'yank cutd)))
+                     (cond
+                        ((null? lines)
+                           ;; act like delete if no data
+                           (ed es env up dp lp))
+                        (fini
+                           (lets ((u d l (buff-append up dp lp lines)))
+                              ;; end change, stay put
+                              (ed es env u d l)))
+                        (else
+                           ;; middle paste, move up
+                           (lets ((u d l (move-up up dp lp))
+                                  (u d l (buff-append u d l lines)))
+                              (ed es env u d l)))))
                   (begin
                      (print "?")
                      (ed es env u d l))))
@@ -442,7 +461,7 @@
                         (ed es env u d l)))))
             ((delete range)
                (print "deleting " range)
-               (lets ((up dp lp cutd (buff-cut-range env u d l range)))
+               (lets ((up dp lp cutd _ (buff-cut-range env u d l range)))
                   (if cutd
                      (ed es 
                         (-> env
