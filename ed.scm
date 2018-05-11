@@ -57,14 +57,21 @@
              (eq? x #\return)
              (eq? x #\space)))))
 
+(define multiline-string-ops
+   (-> #empty
+      (put #\a 'append)
+      (put #\c 'change)))
+
 (define (get-action range)
    (one-of
       (let-parses
-         ((skip (imm #\a))
+         ((op-char (get-byte-if (λ (x) (get multiline-string-ops x #false))))
           (delim (star get-non-newline)) ;; optional alternative delimiting line
           (skip (imm #\newline))
           (cs (upto-line (list->string (if (null? delim) (list #\.) delim)))))
-         (tuple 'append range cs))
+         (tuple 
+            (getf multiline-string-ops op-char)
+            range cs))
       (let-parses
          ((skip (imm #\u)))
          (tuple 'undo))
@@ -276,6 +283,7 @@
          (print-to stderr (str "range wat: " exp))
          (values #f #f))))
 
+;; u d l n → u' d' n | #f #f #f
 (define (seek-line u d l n)
    (cond
       ((= l n)
@@ -290,7 +298,11 @@
          (seek-line (cons (car d) u) (cdr d) (+ l 1) n))))
 
 (define (print-range env u d l to number?)
-   (print (if number? (str l "   ") "") (runes->string (car u)))
+   (print 
+      (if number? 
+         (str l "   ")
+         "") 
+      (runes->string (car u)))
    (cond
       ((= l to)
          (values u d l))
@@ -332,6 +344,38 @@
          (- n 1)
          delim)))
 
+;; → u' d' l' range-lines | u d l #f
+(define (buff-cut-range env u d l range)
+   (lets ((from to (eval-range env u d l range 'dot)))
+      (if (valid-range? from to l (λ () (+ l (length d))))
+         (lets
+            ((u d l (seek-line u d l from))
+             (this u (uncons u #f))
+             (l (- l 1))
+             (cutd d (split d (- to from)))
+             (cutd (cons this cutd)))
+            (if (null? d)
+               (values u d l cutd)
+               (values (cons (car d) u) (cdr d) (+ l 1) cutd)))
+         (values u d l #f))))
+
+;; u' d' l' | #f #f #f
+(define (buff-seek-line env u d l pos default)
+   (print "seeking " pos)
+   (if-lets
+      ((start pos (eval-range env u d l pos default))
+       (up dp lp (seek-line u d l pos)))
+      (begin
+         (values up dp lp))
+      (values #f #f #f)))
+
+;; u d l lines → u' d' l'
+(define (buff-append u d l lines)
+   (values 
+      (append (reverse lines) u)
+      d
+      (+ l (length lines))))
+
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
    (maybe-prompt env)
@@ -342,14 +386,23 @@
       (if a
          (tuple-case a
             ((append pos data)
-               (if (null? data)
-                  (ed es env u d l)
-                  (lets ((lines (cut data #\newline)))
-                     (ed es
-                        (put env 'undo (tuple u d l))
-                        (append (reverse lines) u)
-                        d
-                        (+ l (length lines))))))
+               (if-lets 
+                  ((up dp lp (buff-seek-line env u d l pos 'dot))
+                   (lines (cut data #\newline))
+                   (up dp lp (buff-append up dp lp lines)))
+                  (ed es (put env 'undo (tuple u d l)) up dp lp)
+                  (begin
+                     (print "?")
+                     (ed es env u d l))))
+            ((change range data)
+               (if-lets
+                  ((up dp lp cutd (buff-cut-range env u d l range))
+                   (lines (cut data #\newline))
+                   (up dp lp (buff-append up dp lp lines)))
+                  (ed es (put env 'undo (tuple u d l)) up dp lp)
+                  (begin
+                     (print "?")
+                     (ed es env u d l))))
             ((undo)
                (let ((last (getf env 'undo)))
                   (if last
@@ -389,19 +442,15 @@
                         (ed es env u d l)))))
             ((delete range)
                (print "deleting " range)
-               (lets ((from to (eval-range env u d l range 'dot)))
-                  (if (valid-range? from to l (λ () (+ l (length d))))
-                     (lets
-                        ((env (put env 'undo (tuple u d l)))
-                         (u d l (seek-line u d l from))
-                         (u (cdr u))
-                         (l (- l 1))
-                         (d (drop d (- to from))))
-                        (if (null? d)
-                           (ed es env u d l)
-                           (ed es env (cons (car d) u) (cdr d) (+ l 1))))
+               (lets ((up dp lp cutd (buff-cut-range env u d l range)))
+                  (if cutd
+                     (ed es 
+                        (-> env
+                           (put 'undo (tuple u d l))
+                           (put 'yank cutd))
+                        up dp lp)
                      (begin
-                        (print-to stderr "?")
+                        (print "?")
                         (ed es env u d l)))))
             ((prompt pt)
                (ed es (put env 'prompt pt) u d l))
