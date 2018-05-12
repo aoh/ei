@@ -165,11 +165,24 @@
        (id get-rune))
       (tuple 'mark id)))
 
+(define get-regex-search
+   (let-parses
+      ((delim (get-byte-if (λ (x) (or (eq? x #\/) (eq? x #\?)))))
+       ;; owl regexps are extended. implement simple ones here later.
+       ;; fixe content for now
+       (chars (star (get-byte-if (λ (x) (not (eq? x delim))))))
+       (skip (get-imm delim)))
+      (tuple 
+         'regex 
+         (if (eq? delim #\?) 'up 'down)
+         chars)))
+   
 (define get-leaf-position
    (one-of
       get-natural
       get-special-place
       get-mark
+      get-regex-search
       (get-epsilon 'default)))
 
 (define (ival byte x)
@@ -250,6 +263,12 @@
                   (if (and a b)
                      (+ a b)
                      #false)))
+            ((regex dir rex)
+               (print "Would search for " rex ", dir " dir)
+               (print "Fixed fake match at first or last line of buffer")
+               (if (eq? dir 'up)
+                  1
+                  (+ l (length d))))
             ((minus a b)
                (lets ((a (eval-position env u d l a default))
                       (b (eval-position env u d l b 1)))
