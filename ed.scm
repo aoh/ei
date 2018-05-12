@@ -105,7 +105,7 @@
          ((skip (imm #\f))
           (skip (star get-same-line-whitespace))
           (path (star get-non-newline)))
-         (tuple 'file (if (null? path) #false (list->string path))))
+         (tuple 'facts (if (null? path) #false (list->string path))))
       (let-parses
           ((skip (imm #\p)))
           (tuple 'print range #f))
@@ -566,7 +566,7 @@
                      (begin
                         (print "?")
                         (ed es env u d l)))))
-            ((file path)
+            ((facts path)
                (lets
                    ((env (if path (put env 'path path) env))
                     (file (get env 'path "?")))
