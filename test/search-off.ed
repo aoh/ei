@@ -1,0 +1,18 @@
+a
+start
+foo
+bar
+bar
+foo
+quux
+bar
+bar
+bar
+end
+.
+7
+
+?bar?,/bar/c
+match area
+.
+w out

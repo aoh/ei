@@ -245,6 +245,29 @@
 (define (get-mark env tag)
    (get (get env 'marks #empty) tag #false))
 
+(define (match-prefix? line pat)
+   (or (null? pat)
+      (and (pair? line)
+         (eq? (car line) (car pat))
+         (match-prefix? (cdr line) (cdr pat)))))
+         
+(define (match-at line rex)
+   (cond
+      ((null? line) #false)
+      ((match-prefix? line rex) #true)
+      (else (match-at (cdr line) rex))))
+
+(define (match-offset lines rex)
+   (call/cc
+      (λ (ret)
+         (fold
+            (λ (off line)
+               (if (match-at line rex)
+                  (ret off)
+                  (+ off 1)))
+            0 lines)
+         #false)))
+      
 (define (eval-position env u d l exp default)
    (cond
       ((number? exp) exp)
@@ -264,11 +287,21 @@
                      (+ a b)
                      #false)))
             ((regex dir rex)
-               (print "Would search for " rex ", dir " dir)
-               (print "Fixed fake match at first or last line of buffer")
-               (if (eq? dir 'up)
-                  1
-                  (+ l (length d))))
+               (cond
+                  ((null? u) ;; no current line, empty buffer
+                     #false)
+                  ((and (eq? dir 'up)
+                     (match-offset (cdr u) rex)) =>
+                     (λ (off)
+                        (print "Match " off " lines back")
+                        (- l (+ off 1))))
+                  ((and (eq? dir 'down)
+                     (match-offset d rex)) =>
+                     (λ (off)
+                        (print "Match " off " lines forward")
+                        (+ l (+ off 1))))
+                  (else
+                     #false)))
             ((minus a b)
                (lets ((a (eval-position env u d l a default))
                       (b (eval-position env u d l b 1)))
