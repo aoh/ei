@@ -546,12 +546,17 @@
          (print (format-rules command-line-rules))
          0)
       (else
-         (ed
-            (λ () (fd->exp-stream stdin get-command syntax-error-handler))
+         (ed 
+            (foldr
+               (λ (path out)
+                  (cons (tuple 'edit path) out))
+               (fd->exp-stream stdin get-command syntax-error-handler)
+               args)
             dict null null 0))))
 
 (define (main args)
-   (process-arguments args command-line-rules usage-text start-ed))
+   (process-arguments (cdr args) 
+      command-line-rules usage-text start-ed))
 
 main
 
