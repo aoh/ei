@@ -1,14 +1,14 @@
 OWLVER=0.1.15
 OWLURL=https://github.com/aoh/owl-lisp/releases/download/v$(OWLVER)
 
-everything: ed
-	test/run ./ed
+everything: ei
+	test/run ./ei
 
-ed: ed.c
-	cc -O2 -o ed ed.c
+ei: ei.c
+	cc -O2 -o ei ei.c
 
-ed.c: ed.scm ol
-	./ol -o ed.c ed.scm
+ei.c: ei.scm ol
+	./ol -o ei.c ei.scm
 
 ol:
 	test -f ol-$(OWLVER).c.gz || wget $(OWLURL)/ol-$(OWLVER).c.gz
@@ -16,7 +16,7 @@ ol:
 	cc -O2 -o ol ol-$(OWLVER).c
 
 clean:
-	-rm ed.c ed
+	-rm ei.c ei
 	-rm ol-$(OWLVER).c ol
 
 mrproper: clean

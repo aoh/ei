@@ -221,6 +221,7 @@
             (epsilon a))))
       val))
 
+;; todo: oh, this should be a kleene+ of kleene+ instead!
 (define get-range
    (either
       (let-parses
@@ -228,12 +229,16 @@
           (end
              (either
                (let-parses
-                  ((skip (get-imm #\,))
+                  ((delim (get-byte-if (λ (x) (or (eq? x #\,) (eq? x #\;)))))
                    (end get-position))
-                  end)
+                  (cons delim end))
                (epsilon #false))))
          (if end
-            (tuple 'range start end)
+            (tuple
+               (if (eq? (car end) #\,)
+                  'range
+                  'range-reset)
+               start (cdr end))
             start))
       get-special-range))
 
@@ -342,6 +347,12 @@
             ((range from to)
                (lets ((start (eval-position env u d l from 'start))
                       (end   (eval-position env u d l to   'end)))
+                  (if (and start end)
+                     (values start end)
+                     (values #f #f))))
+            ((range-reset from to)
+               (lets ((start (eval-position env u d l from   'start))
+                      (end   (eval-position env u d start to 'end)))
                   (if (and start end)
                      (values start end)
                      (values #f #f))))
