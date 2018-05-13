@@ -9,6 +9,15 @@
    (owl unicode)
    (owl args))
 
+(define (output env thing)
+   (if (not (get env 'silent #f))
+      (print thing)))
+
+(define (complain env reason)
+   (print "?")
+   (if (get env 'verbose-complain #f)
+      (print reason)))
+      
 (define version "0.1a")
 
 (define (cut lst thing)
@@ -27,9 +36,15 @@
  `((help "-h" "--help")
    (about "-A" "--about")
    (version "-V" "--version")
+   (silent "-s" "--silent")
    (prompt "-p" "--prompt" has-arg
       comment "optional prompt")
    ))
+
+
+;; env:
+;;   silent (bool), print write counts
+;;   verbose-complain, bool, print multibyte error messages (wastes paper!)
 
 (define command-line-rules
    (cl-rules command-line-rule-exp))
@@ -88,9 +103,7 @@
          ((skip (imm #\P))
           (prompt (star get-non-newline))) ;; optional multi-character prompt support!
          (tuple 'prompt 
-            (if (null? prompt)
-               "*"
-               (list->string prompt))))
+            (list->string prompt)))
       (let-parses
          ((skip (imm #\w))
           (skip (star get-same-line-whitespace))
@@ -120,6 +133,12 @@
          ((skip (imm #\j))
           (joiner (star get-non-newline))) ;; extra feature
          (tuple 'join range joiner))
+      (let-parses
+         ((skip (imm #\~)))
+         (tuple 'inspect))
+      (let-parses
+         ((skip (imm #\H)))
+         (tuple 'help))
       (let-parses
          ((skip (imm #\newline)))
          (tuple 'print
@@ -293,12 +312,10 @@
                   ((and (eq? dir 'up)
                      (match-offset (cdr u) rex)) =>
                      (λ (off)
-                        (print "Match " off " lines back")
                         (- l (+ off 1))))
                   ((and (eq? dir 'down)
                      (match-offset d rex)) =>
                      (λ (off)
-                        (print "Match " off " lines forward")
                         (+ l (+ off 1))))
                   (else
                      #false)))
@@ -413,7 +430,6 @@
 
 ;; u' d' l' | #f #f #f
 (define (buff-seek-line env u d l pos default)
-   (print "seeking " pos)
    (if-lets
       ((start pos (eval-range env u d l pos default))
        (up dp lp (seek-line u d l pos)))
@@ -439,7 +455,10 @@
    (maybe-prompt env)
    (if (not (= (length u) l))
       (print "BUG: position off sync"))
-   (lets ((a es (uncons es #f)))
+   (lets 
+      ((a es (uncons es #f))
+       (last (getf env 'last))
+       (env (put env 'last a)))
       ; (print-to stderr a)
       (if a
          (tuple-case a
@@ -450,7 +469,7 @@
                    (up dp lp (buff-append up dp lp lines)))
                   (ed es (put env 'undo (tuple u d l)) up dp lp)
                   (begin
-                     (print "?")
+                     (complain env "bad range")
                      (ed es env u d l))))
             ((change range data)
                (if-lets
@@ -472,7 +491,7 @@
                                   (u d l (buff-append u d l lines)))
                               (ed es env u d l)))))
                   (begin
-                     (print "?")
+                     (complain env "bad range")
                      (ed es env u d l))))
             ((undo)
                (let ((last (getf env 'undo)))
@@ -498,7 +517,7 @@
                          (u d l (print-range env u d l to number?)))
                         (ed es env u d l))
                      (begin
-                        (print-to stderr "?")
+                        (complain env "bad range")
                         (ed es env u d l)))))
             ((join range delim)
                (lets ((from to (eval-range env u d l range (tuple 'range 'dot (tuple 'plus 'dot 1)))))
@@ -512,7 +531,6 @@
                         (print-to stderr "?")
                         (ed es env u d l)))))
             ((delete range)
-               (print "deleting " range)
                (lets ((up dp lp cutd _ (buff-cut-range env u d l range)))
                   (if cutd
                      (ed es 
@@ -521,10 +539,18 @@
                            (put 'yank cutd))
                         up dp lp)
                      (begin
-                        (print "?")
+                        (complain env "bad range")
                         (ed es env u d l)))))
             ((prompt pt)
-               (ed es (put env 'prompt pt) u d l))
+               (cond
+                  ((not (equal? pt "")) 
+                     ;; explicit prompt given
+                     (ed es (put env 'prompt pt) u d l))
+                  ((getf env 'prompt)
+                     ;; prompter enabled, disable
+                     (ed es (del env 'prompt) u d l))
+                  (else
+                     (ed es (put env 'prompt "*") u d l))))
             ((write range path)
                (lets
                   ((lines (append (reverse u) d)) ;; ignore range for now
@@ -534,10 +560,10 @@
                    (port (maybe open-output-file path)))
                   (if (not (and port (write-bytes port bytes)))
                      (begin
-                        (print-to stderr "?")
+                        (complain env "something failed")
                         (ed es env u d l))
                      (begin
-                        (print (length bytes))
+                        (output env (length bytes))
                         (ed es
                            (put env 'path path)
                            u d l)))))
@@ -550,21 +576,21 @@
                    (lines (cut runes #\newline))
                    (nlines (length lines)))
                   (begin
-                     (print nbytes)
+                     (output env nbytes)
                      (ed es
                         (put env 'path path)
                         (reverse lines)
                         null
                         nlines))
                   (begin
-                     (print-to stderr "?")
+                     (complain env "something failed")
                      (ed es env u d l))))
             ((mark pos tag)
                (lets ((pos (eval-position env u d l pos 'dot)))
                   (if pos
                      (ed es (add-mark env tag pos) u d l)
                      (begin
-                        (print "?")
+                        (complain env "something failed")
                         (ed es env u d l)))))
             ((facts path)
                (lets
@@ -572,8 +598,18 @@
                     (file (get env 'path "?")))
                    (print file)
                    (ed es env u d l)))
+             ((inspect)
+                (print "ei: line " l)
+                (print "ei: env " (del env 'last))
+                (print "ei: last " last)
+                (ed es env u d l))
+            ((help)
+               (ed es 
+                  (put env 'verbose-help
+                     (not (getf env 'verbose-help)))
+                  u d l))
             (else
-               (print-to stderr "?!")
+               (complain env (str "Cannot grok " a))
                (ed es env u d l))))))
 
 (define (forward-read ll)
