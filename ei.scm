@@ -33,14 +33,28 @@
             (loop (cdr lst) (cons (car lst) this) others)))))
 
 (define command-line-rule-exp
- `((help "-h" "--help")
-   (about "-A" "--about")
-   (version "-V" "--version")
-   (silent "-s" "--silent")
+ `((help "-h" "--help"
+      comment "show this thing")
+   (about "-A" "--about"
+      comment "tell a bit about this program")
+   (version "-V" "--version"
+      comment "show program version")
+   (silent "-s" "--silent"
+      comment "save paper by not printing byte counts")
    (prompt "-p" "--prompt" has-arg
-      comment "optional prompt")
-   ))
+      comment "optional prompt")))
 
+(define (modified env)
+   (if (getf env 'modified)
+      env
+      (put env 'modified #true)))
+
+(define (not-modified env)
+   (del env 'modified))
+
+(define (modified? env)
+   (get env 'modified #false))
+      
 
 ;; env:
 ;;   silent (bool), print write counts
@@ -76,75 +90,6 @@
    (-> #empty
       (put #\a 'append)
       (put #\c 'change)))
-
-(define (get-action range)
-   (one-of
-      (let-parses
-         ((op-char (get-byte-if (λ (x) (get multiline-string-ops x #false))))
-          (delim (star get-non-newline)) ;; optional alternative delimiting line
-          (skip (imm #\newline))
-          (cs (upto-line (list->string (if (null? delim) (list #\.) delim)))))
-         (tuple 
-            (getf multiline-string-ops op-char)
-            range cs))
-      (let-parses
-         ((skip (imm #\u)))
-         (tuple 'undo))
-      (let-parses
-          ((skip (imm #\=)))
-          (tuple 'print-position range))
-      (let-parses
-          ((skip (imm #\n)))
-          (tuple 'print range #t))
-      (let-parses
-         ((skip (imm #\d)))
-         (tuple 'delete range))
-      (let-parses
-         ((skip (imm #\P))
-          (prompt (star get-non-newline))) ;; optional multi-character prompt support!
-         (tuple 'prompt 
-            (list->string prompt)))
-      (let-parses
-         ((skip (imm #\w))
-          (skip (star get-same-line-whitespace))
-          (path (star get-non-newline))) ;; empty = last
-         (tuple 'write range (list->string path)))
-      (let-parses
-         ((skip (imm #\e))
-          (skip (star get-same-line-whitespace))
-          (path (star get-non-newline))) ;; empty = last
-         (tuple 'edit (list->string path)))
-      (let-parses
-         ((skip (imm #\f))
-          (skip (star get-same-line-whitespace))
-          (path (star get-non-newline)))
-         (tuple 'facts (if (null? path) #false (list->string path))))
-      (let-parses
-          ((skip (imm #\p)))
-          (tuple 'print range #f))
-      (let-parses
-         ((skip (imm #\k))
-          (tag get-rune))
-         (tuple 'mark range tag))
-      (let-parses
-         ((skip (imm #\Q)))
-         (tuple 'quit #true))
-      (let-parses
-         ((skip (imm #\j))
-          (joiner (star get-non-newline))) ;; extra feature
-         (tuple 'join range joiner))
-      (let-parses
-         ((skip (imm #\~)))
-         (tuple 'inspect))
-      (let-parses
-         ((skip (imm #\H)))
-         (tuple 'help))
-      (let-parses
-         ((skip (imm #\newline)))
-         (tuple 'print
-            (if (eq? range 'default)
-               (tuple 'plus 'dot 1) ;; blank command = +1
-               range) #false))))
 
 (define get-digit
    (get-byte-if
@@ -220,6 +165,88 @@
                (tuple op a arg))
             (epsilon a))))
       val))
+
+(define (get-action range)
+   (one-of
+      (let-parses
+         ((op-char (get-byte-if (λ (x) (get multiline-string-ops x #false))))
+          (delim (star get-non-newline)) ;; optional alternative delimiting line
+          (skip (imm #\newline))
+          (cs (upto-line (list->string (if (null? delim) (list #\.) delim)))))
+         (tuple 
+            (getf multiline-string-ops op-char)
+            range cs))
+      (let-parses
+         ((skip (imm #\u)))
+         (tuple 'undo))
+      (let-parses
+          ((skip (imm #\=)))
+          (tuple 'print-position range))
+      (let-parses
+          ((skip (imm #\n)))
+          (tuple 'print range #t))
+      (let-parses
+         ((skip (imm #\d)))
+         (tuple 'delete range))
+      (let-parses
+         ((skip (imm #\P))
+          (prompt (star get-non-newline))) ;; optional multi-character prompt support!
+         (tuple 'prompt 
+            (list->string prompt)))
+      (let-parses
+         ((skip (imm #\w))
+          (skip (star get-same-line-whitespace))
+          (path (star get-non-newline))) ;; empty = last
+         (tuple 'write range (list->string path)))
+      (let-parses
+         ((skip (imm #\m))
+          (target get-position))
+         (tuple 'move range target))
+      (let-parses
+         ((op (get-byte-if (λ (x) (or (eq? x #\e) (eq? x #\E)))))
+          (skip (star get-same-line-whitespace))
+          (path (star get-non-newline))) ;; empty = last
+         (tuple 'edit 
+            (list->string path)
+            (eq? op #\E)))
+      (let-parses
+         ((skip (imm #\f))
+          (skip (star get-same-line-whitespace))
+          (path (star get-non-newline)))
+         (tuple 'facts (if (null? path) #false (list->string path))))
+      (let-parses
+          ((skip (imm #\p)))
+          (tuple 'print range #f))
+      (let-parses
+         ((skip (imm #\k))
+          (tag get-rune))
+         (tuple 'mark range tag))
+      (let-parses
+         ((skip (imm #\Q)))
+         (tuple 'quit #true))
+      (let-parses
+         ((skip (imm #\q)))
+         (tuple 'quit #false))
+      (let-parses
+         ((skip (imm #\j))
+          (joiner (star get-non-newline))) ;; extra feature
+         (tuple 'join range joiner))
+      (let-parses
+         ((skip (imm #\~)))
+         (tuple 'inspect))
+      (let-parses
+         ((skip (imm #\H)))
+         (tuple 'help))
+      (let-parses
+         ((skip (imm #\x))
+          (skip (imm #\newline)))
+         (tuple 'context range))
+      (let-parses
+         ((skip (imm #\newline)))
+         (tuple 'print
+            (if (eq? range 'default)
+               (tuple 'plus 'dot 1) ;; blank command = +1
+               range) #false))))
 
 ;; todo: oh, this should be a kleene+ of kleene+ instead!
 (define get-range
@@ -460,6 +487,32 @@
    (if (null? u)
       (values u d l)
       (values (cdr u) (cons (car u) d) (- l 1))))
+
+(define (weight x)
+   (write-bytes stdout
+      (cond
+         ((eq? x 'normal) '(27 #\[ #\m))
+         ((eq? x 'bright) '(27 #\[ #\1 #\m))
+         ((eq? x 'dim) '(27 #\[ #\2 #\m))
+         ((eq? x 'reverse) '(27 #\[ #\7 #\m)))))
+
+(define (pad n)
+   (cond
+      ((< n 10)     (str "    " n))
+      ((< n 100)    (str "   " n))
+      ((< n 1000)   (str "  " n))
+      (else (str " " n))))
+
+(define (render-row this)
+   (λ (l)
+      (if (equal? (car l) this)
+         (begin
+            (weight 'reverse)
+            (print (str (pad this) "    " (list->string (cdr l))))
+            (weight 'normal))
+         (print
+            (str (pad (car l))  "    "
+               (list->string (cdr l)))))))
    
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
@@ -470,7 +523,7 @@
       ((a es (uncons es #f))
        (last (getf env 'last))
        (env (put env 'last a)))
-      ; (print-to stderr a)
+      ;(print-to stderr a)
       (if a
          (tuple-case a
             ((append pos data)
@@ -478,7 +531,8 @@
                   ((up dp lp (buff-seek-line env u d l pos 'dot))
                    (lines (cut data #\newline))
                    (up dp lp (buff-append up dp lp lines)))
-                  (ed es (put env 'undo (tuple u d l)) up dp lp)
+                  (ed es 
+                     (modified (put env 'undo (tuple u d l))) up dp lp)
                   (begin
                      (complain env "bad range")
                      (ed es env u d l))))
@@ -487,7 +541,8 @@
                   ((up dp lp cutd fini (buff-cut-range env u d l range)))
                   (lets ((lines (cut data #\newline))
                          (env (put env 'undo (tuple u d l)))
-                         (env (put env 'yank cutd)))
+                         (env (put env 'yank cutd))
+                         (env (modified env)))
                      (cond
                         ((null? lines)
                            ;; act like delete if no data
@@ -518,8 +573,25 @@
                (lets ((pos (eval-position env u d l range 'dot)))
                   (print pos)
                   (ed es env u d l)))
+            ((move range to)
+               (if-lets
+                  ((from to (eval-range env u d l range 'dot))
+                   (target (eval-position env u d l to 'dot)))
+                  (begin
+                     (print "would move " from "-" to " → " target)
+                     (ed es env u d l))
+                  (begin
+                     (print "wha")
+                     (complain env "fishy addresses")
+                     (ed es env u d l))))
             ((quit force?)
-               0)
+               ;; clean buffer: quit on q and Q
+               ;; dirty buffer: quit on second q and Q
+               (if (or force?
+                     (not (modified? env))
+                     (equal? last (tuple 'quit #false)))
+                  0
+                  (ed es env u d l)))
             ((print range number?)
                (lets ((from to (eval-range env u d l range 'dot)))
                   (if (valid-range? from to l (λ () (+ l (length d))))
@@ -537,7 +609,7 @@
                         ((u d l (seek-line u d l from))
                          (env (put env 'undo (tuple u d l)))
                          (u d (join-lines u d (- to from) delim)))
-                        (ed es env u d l))
+                        (ed es (modified env) u d l))
                      (begin
                         (print-to stderr "?")
                         (ed es env u d l)))))
@@ -545,9 +617,10 @@
                (lets ((up dp lp cutd _ (buff-cut-range env u d l range)))
                   (if cutd
                      (ed es 
-                        (-> env
-                           (put 'undo (tuple u d l))
-                           (put 'yank cutd))
+                        (modified 
+                           (-> env
+                              (put 'undo (tuple u d l))
+                              (put 'yank cutd)))
                         up dp lp)
                      (begin
                         (complain env "bad range")
@@ -576,26 +649,30 @@
                      (begin
                         (output env (length bytes))
                         (ed es
-                           (put env 'path path)
+                           (not-modified (put env 'path path))
                            u d l)))))
-            ((edit path)
-               (if-lets
-                  ((path (if (equal? path "") (getf env 'path) path))
-                   (data (file->list path))
-                   (nbytes (length data))
-                   (runes (utf8-decode data)) ;; mandatory for now
-                   (lines (cut runes #\newline))
-                   (nlines (length lines)))
+            ((edit path force?)
+               (if (and (modified? env) (not force?))
                   (begin
-                     (output env nbytes)
-                     (ed es
-                        (put env 'path path)
-                        (reverse lines)
-                        null
-                        nlines))
-                  (begin
-                     (complain env "something failed")
-                     (ed es env u d l))))
+                     (complain env "current buffer is modified")
+                     (ed es env u d l))
+                  (if-lets
+                     ((path (if (equal? path "") (getf env 'path) path))
+                      (data (file->list path))
+                      (nbytes (length data))
+                      (runes (utf8-decode data)) ;; mandatory for now
+                      (lines (cut runes #\newline))
+                      (nlines (length lines)))
+                     (begin
+                        (output env nbytes)
+                        (ed es
+                           (put env 'path path)
+                           (reverse lines)
+                           null
+                           nlines))
+                     (begin
+                        (complain env "something failed")
+                        (ed es env u d l)))))
             ((mark pos tag)
                (lets ((pos (eval-position env u d l pos 'dot)))
                   (if pos
@@ -614,6 +691,24 @@
                 (print "ei: env " (del env 'last))
                 (print "ei: last " last)
                 (ed es env u d l))
+            ((context pos)
+               (lets ((pos (eval-position env u d l pos 'dot)))
+                  (if pos
+                     (lets 
+                        ((u d l (buff-seek-line env u d l pos 'dot))
+                         (up 
+                           (force-ll 
+                              (lzip cons 
+                                 (liota l -1 0) 
+                                 (take u 4))))
+                         (down 
+                            (force-ll (lzip cons (liota (+ l 1) +1 (+ l 4)) d))))
+                        (for-each (render-row l)
+                           (append (reverse up) down))
+                        (ed es env u d l))
+                     (begin
+                        (complain env "bad position")
+                        (ed es env u d l)))))
             ((help)
                (ed es 
                   (put env 'verbose-help
@@ -648,7 +743,7 @@
          (ed 
             (foldr
                (λ (path out)
-                  (cons (tuple 'edit path) out))
+                  (cons (tuple 'edit path #true) out))
                (fd->exp-stream stdin get-command syntax-error-handler)
                args)
             dict null null 0))))
