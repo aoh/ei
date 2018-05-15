@@ -15,6 +15,11 @@ ol:
 	gzip -d < ol-$(OWLVER).c.gz > ol-$(OWLVER).c
 	cc -O2 -o ol ol-$(OWLVER).c
 
+install: ei
+	install -m 755 ei /usr/bin/ei
+
+uninstall: 
+	-rm /usr/bin/ei
 clean:
 	-rm ei.c ei
 	-rm ol-$(OWLVER).c ol
