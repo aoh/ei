@@ -570,10 +570,10 @@
 
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
-   (maybe-prompt env)
    ;(if (not (= (length u) l))
    ;  (print "BUG: position off sync"))
    (maybe-context env u d l)
+   (maybe-prompt env)
    
    (lets 
       ((a es (uncons es #f))
