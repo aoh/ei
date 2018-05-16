@@ -421,6 +421,9 @@
                   (if (and start end)
                      (values start end)
                      (values #f #f))))
+            ((regex dir rex)
+               ;; would have succeeded in eval-position
+               (values #f #f))
             (else
                (print-to stderr (str "range wat: " exp))
                (values #f #f))))
