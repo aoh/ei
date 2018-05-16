@@ -9,6 +9,19 @@
    (owl unicode)
    (owl args))
 
+;; line = (code-point ...)
+;;      | (metadata-ff code-point ...)
+
+(define (drop-line-info x)
+   (cond
+      ((null? x) x)
+      ((ff? (car x))
+         (cdr x))
+      (else x)))
+
+(define (clear-infos lines)
+   (map drop-line-info lines))
+      
 (define (output env thing)
    (if (not (get env 'silent #f))
       (print thing)))
@@ -41,6 +54,8 @@
       comment "show program version")
    (silent "-s" "--silent"
       comment "save paper by not printing byte counts")
+   (autocontext #false "--autocontext"
+      comment "automatic .x after commands (temp)")
    (prompt "-p" "--prompt" has-arg
       comment "optional prompt")))
 
@@ -133,14 +148,14 @@
    (let-parses
       ((delim (get-byte-if (λ (x) (or (eq? x #\/) (eq? x #\?)))))
        ;; owl regexps are extended. implement simple ones here later.
-       ;; fixe content for now
+       ;; todo: the delimiter is actually arbitrary, at least in s?
        (chars (star (get-byte-if (λ (x) (not (eq? x delim))))))
        (skip (get-imm delim)))
       (tuple 
          'regex 
          (if (eq? delim #\?) 'up 'down)
          chars)))
-   
+
 (define get-leaf-position
    (one-of
       get-natural
@@ -166,7 +181,18 @@
             (epsilon a))))
       val))
 
-(define (get-action range)
+;; what is considered to be whitespace between commands in a g/re/ command list
+;; the command list is terminated by a lone newline
+(define get-global-whitespace
+   (one-of
+      (get-imm #\space)
+      (get-imm #\tab)
+      (let-parses
+         ((skip (get-imm #\\))
+          (skip (get-imm #\newline)))
+         'line)))
+      
+(define (get-action range make-get-command)
    (one-of
       (let-parses
          ((op-char (get-byte-if (λ (x) (get multiline-string-ops x #false))))
@@ -242,6 +268,18 @@
           (skip (imm #\newline)))
          (tuple 'context range))
       (let-parses
+         ((skip (imm #\g))
+          (rex get-regex-search)
+          (first (make-get-command))
+          (rest 
+             (star
+               (let-parses
+                  ((skip get-global-whitespace)
+                   (this (make-get-command)))
+                  this)))
+          (skip (get-imm #\newline)))
+          (tuple 'global rex (cons first rest)))
+      (let-parses
          ((skip (imm #\newline)))
          (tuple 'print
             (if (eq? range 'default)
@@ -279,13 +317,13 @@
       ((skip (star get-whitespace)))
       'whitespace))
 
-(define get-command
+(define (make-get-command)
    (let-parses
       ((skip maybe-whitespace)
        (range get-range)
-       (action (get-action range)))
+       (action (get-action range make-get-command)))
       action))
-
+   
 (define usage-text
    "Usage: ed [args] [path]")
 
@@ -513,12 +551,27 @@
          (print
             (str (pad (car l))  "    "
                (list->string (cdr l)))))))
-   
+
+(define (show-context u d l n)   
+   (lets
+      ((up 
+         (force-ll (lzip cons (liota l -1 0) (take u n))))
+       (down 
+         (force-ll (lzip cons (liota (+ l 1) +1 (+ l n)) d))))
+      (for-each (render-row l)
+         (append (reverse up) down))))
+
+(define (maybe-context env u d l)
+   (if (get env 'autocontext #false)
+      (show-context u d l 4)))
+
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
    (maybe-prompt env)
-   (if (not (= (length u) l))
-      (print "BUG: position off sync"))
+   ;(if (not (= (length u) l))
+   ;  (print "BUG: position off sync"))
+   (maybe-context env u d l)
+   
    (lets 
       ((a es (uncons es #f))
        (last (getf env 'last))
@@ -692,23 +745,14 @@
                 (print "ei: last " last)
                 (ed es env u d l))
             ((context pos)
-               (lets ((pos (eval-position env u d l pos 'dot)))
-                  (if pos
-                     (lets 
-                        ((u d l (buff-seek-line env u d l pos 'dot))
-                         (up 
-                           (force-ll 
-                              (lzip cons 
-                                 (liota l -1 0) 
-                                 (take u 4))))
-                         (down 
-                            (force-ll (lzip cons (liota (+ l 1) +1 (+ l 4)) d))))
-                        (for-each (render-row l)
-                           (append (reverse up) down))
-                        (ed es env u d l))
-                     (begin
-                        (complain env "bad position")
-                        (ed es env u d l)))))
+               (if-lets 
+                  ((u d l (buff-seek-line env u d l pos 'dot)))
+                  (begin
+                     (show-context u d l 4)
+                     (ed es env u d l))
+                  (begin
+                     (complain "bad position")
+                     (ed es env u d l))))
             ((help)
                (ed es 
                   (put env 'verbose-help
@@ -744,7 +788,7 @@
             (foldr
                (λ (path out)
                   (cons (tuple 'edit path #true) out))
-               (fd->exp-stream stdin get-command syntax-error-handler)
+               (fd->exp-stream stdin (make-get-command) syntax-error-handler)
                args)
             dict null null 0))))
 
