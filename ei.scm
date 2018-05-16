@@ -268,6 +268,10 @@
           (skip (imm #\newline)))
          (tuple 'context range))
       (let-parses
+         ((skip (get-byte-if (λ (x) (and (eq? range 'default)
+                                         (eq? x #\newline))))))
+         (tuple 'last))
+      (let-parses
          ((skip (imm #\g))
           (rex get-regex-search)
           (first (make-get-command))
@@ -319,7 +323,7 @@
 
 (define (make-get-command)
    (let-parses
-      ((skip maybe-whitespace)
+      ((skip (star get-same-line-whitespace))
        (range get-range)
        (action (get-action range make-get-command)))
       action))
@@ -742,11 +746,13 @@
                     (file (get env 'path "?")))
                    (print file)
                    (ed es env u d l)))
-             ((inspect)
+            ((inspect)
                 (print "ei: line " l)
                 (print "ei: env " (del env 'last))
                 (print "ei: last " last)
                 (ed es env u d l))
+            ((last)
+               (ed (cons last es) (put env 'last last) u d l))
             ((context pos)
                (if-lets 
                   ((u d l (buff-seek-line env u d l pos 'dot)))
