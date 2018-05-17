@@ -56,6 +56,8 @@
       comment "save paper by not printing byte counts")
    (autocontext #false "--autocontext"
       comment "automatic .x after commands (temp)")
+   (autoclear #false "--autoclear"
+      comment "automatic clear screen between contexts")
    (prompt "-p" "--prompt" has-arg
       comment "optional prompt")))
 
@@ -203,92 +205,91 @@
             (getf multiline-string-ops op-char)
             range cs))
       (let-parses
-         ((skip (imm #\u)))
-         (tuple 'undo))
-      (let-parses
-          ((skip (imm #\=)))
-          (tuple 'print-position range))
-      (let-parses
-          ((skip (imm #\n)))
-          (tuple 'print range #t))
-      (let-parses
-         ((skip (imm #\d)))
-         (tuple 'delete range))
-      (let-parses
-         ((skip (imm #\P))
-          (prompt (star get-non-newline))) ;; optional multi-character prompt support!
-         (tuple 'prompt 
-            (list->string prompt)))
-      (let-parses
-         ((skip (imm #\w))
-          (skip (star get-same-line-whitespace))
-          (path (star get-non-newline))) ;; empty = last
-         (tuple 'write range (list->string path)))
-      (let-parses
-         ((skip (imm #\m))
-          (target get-position))
-         (tuple 'move range target))
-      (let-parses
-         ((op (get-byte-if (λ (x) (or (eq? x #\e) (eq? x #\E)))))
-          (skip (star get-same-line-whitespace))
-          (path (star get-non-newline))) ;; empty = last
-         (tuple 'edit 
-            (list->string path)
-            (eq? op #\E)))
-      (let-parses
-         ((skip (imm #\f))
-          (skip (star get-same-line-whitespace))
-          (path (star get-non-newline)))
-         (tuple 'facts (if (null? path) #false (list->string path))))
-      (let-parses
-          ((skip (imm #\p)))
-          (tuple 'print range #f))
-      (let-parses
-         ((skip (imm #\k))
-          (tag get-rune))
-         (tuple 'mark range tag))
-      (let-parses
-         ((skip (imm #\Q)))
-         (tuple 'quit #true))
-      (let-parses
-         ((skip (imm #\q)))
-         (tuple 'quit #false))
-      (let-parses
-         ((skip (imm #\j))
-          (joiner (star get-non-newline))) ;; extra feature
-         (tuple 'join range joiner))
-      (let-parses
-         ((skip (imm #\~)))
-         (tuple 'inspect))
-      (let-parses
-         ((skip (imm #\H)))
-         (tuple 'help))
-      (let-parses
-         ((skip (imm #\x))
-          (skip (imm #\newline)))
-         (tuple 'context range))
-      (let-parses
-         ((skip (get-byte-if (λ (x) (and (eq? range 'default)
-                                         (eq? x #\newline))))))
-         (tuple 'last))
-      (let-parses
-         ((skip (imm #\g))
-          (rex get-regex-search)
-          (first (make-get-command))
-          (rest 
-             (star
+         ((val 
+            (one-of
                (let-parses
-                  ((skip get-global-whitespace)
-                   (this (make-get-command)))
-                  this)))
-          (skip (get-imm #\newline)))
-          (tuple 'global rex (cons first rest)))
-      (let-parses
-         ((skip (imm #\newline)))
-         (tuple 'print
-            (if (eq? range 'default)
-               (tuple 'plus 'dot 1) ;; blank command = +1
-               range) #false))))
+                  ((skip (imm #\u)))
+                  (tuple 'undo))
+               (let-parses
+                   ((skip (imm #\=)))
+                   (tuple 'print-position range))
+               (let-parses
+                   ((skip (imm #\n)))
+                   (tuple 'print range #t))
+               (let-parses
+                  ((skip (imm #\d)))
+                  (tuple 'delete range))
+               (let-parses
+                  ((skip (imm #\P))
+                   (prompt (star get-non-newline))) ;; optional multi-character prompt support!
+                  (tuple 'prompt 
+                     (list->string prompt)))
+               (let-parses
+                  ((skip (imm #\w))
+                   (skip (star get-same-line-whitespace))
+                   (path (star get-non-newline))) ;; empty = last
+                  (tuple 'write range (list->string path)))
+               (let-parses
+                  ((skip (imm #\m))
+                   (target get-position))
+                  (tuple 'move range target))
+               (let-parses
+                  ((op (get-byte-if (λ (x) (or (eq? x #\e) (eq? x #\E)))))
+                   (skip (star get-same-line-whitespace))
+                   (path (star get-non-newline))) ;; empty = last
+                  (tuple 'edit 
+                     (list->string path)
+                     (eq? op #\E)))
+               (let-parses
+                  ((skip (imm #\f))
+                   (skip (star get-same-line-whitespace))
+                   (path (star get-non-newline)))
+                  (tuple 'facts (if (null? path) #false (list->string path))))
+               (let-parses
+                   ((skip (imm #\p)))
+                   (tuple 'print range #f))
+               (let-parses
+                  ((skip (imm #\k))
+                   (tag get-rune))
+                  (tuple 'mark range tag))
+               (let-parses
+                  ((skip (imm #\Q)))
+                  (tuple 'quit #true))
+               (let-parses
+                  ((skip (imm #\q)))
+                  (tuple 'quit #false))
+               (let-parses
+                  ((skip (imm #\j))
+                   (joiner (star get-non-newline))) ;; extra feature
+                  (tuple 'join range joiner))
+               (let-parses
+                  ((skip (imm #\~)))
+                  (tuple 'inspect))
+               (let-parses
+                  ((skip (imm #\H)))
+                  (tuple 'help))
+               (let-parses
+                  ((skip (imm #\x))
+                   (skip (imm #\newline)))
+                  (tuple 'context range))
+               (let-parses
+                  ((skip (imm #\g))
+                   (rex get-regex-search)
+                   (first (make-get-command))
+                   (rest 
+                      (star
+                        (let-parses
+                           ((skip get-global-whitespace)
+                            (this (make-get-command)))
+                           this))))
+                   (tuple 'global rex (cons first rest)))
+                (epsilon 'nothing)))
+          (skip (imm #\newline)))
+       (if (eq? val 'nothing)
+          (if (eq? range 'default)
+             (tuple 'last)
+             (tuple 'print range #f))
+          val))))
 
 ;; todo: oh, this should be a kleene+ of kleene+ instead!
 (define get-range
@@ -327,7 +328,17 @@
        (range get-range)
        (action (get-action range make-get-command)))
       action))
-   
+
+(define (make-get-interactive-command)
+   (let-parses
+      ((skip (star get-same-line-whitespace))
+       (range get-range)
+       (skip (star get-same-line-whitespace))
+       (action (get-action range make-get-command))
+       (skip (star get-same-line-whitespace))
+       (skip (either (imm #\newline) (epsilon null))))
+      action))
+ 
 (define usage-text
    "Usage: ed [args] [path]")
 
@@ -541,6 +552,12 @@
          ((eq? x 'dim) '(27 #\[ #\2 #\m))
          ((eq? x 'reverse) '(27 #\[ #\7 #\m)))))
 
+(define (clear-screen)
+   (write-bytes stdout
+      (list 
+         27 #\[ #\2 #\J
+         )))
+
 (define (pad n)
    (cond
       ((< n 10)     (str "    " n))
@@ -569,6 +586,8 @@
          (append (reverse up) down))))
 
 (define (maybe-context env u d l)
+   (if (get env 'autoclear #false)
+      (clear-screen))
    (if (get env 'autocontext #false)
       (show-context u d l 4)))
 
@@ -583,7 +602,7 @@
       ((a es (uncons es #f))
        (last (getf env 'last))
        (env (put env 'last a)))
-      ;(print-to stderr a)
+      (print-to stderr a)
       (if a
          (tuple-case a
             ((append pos data)
@@ -666,8 +685,8 @@
                (lets ((from to (eval-range env u d l range (tuple 'range 'dot (tuple 'plus 'dot 1)))))
                   (if (valid-range? from to l (λ () (+ l (length d))))
                      (lets
-                        ((u d l (seek-line u d l from))
-                         (env (put env 'undo (tuple u d l)))
+                        ((env (put env 'undo (tuple u d l)))
+                         (u d l (seek-line u d l from))
                          (u d (join-lines u d (- to from) delim)))
                         (ed es (modified env) u d l))
                      (begin
