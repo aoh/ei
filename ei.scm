@@ -1,4 +1,4 @@
-#!/usr/bin/ol --run
+#!./ol --run
 
 ;;;
 ;;; Ed - an implementation of the standard editor
@@ -7,6 +7,7 @@
 (import
    (owl parse)
    (owl unicode)
+   (owl sys)
    (owl args))
 
 ;; line = (code-point ...)
@@ -151,8 +152,8 @@
       ((delim (get-byte-if (λ (x) (or (eq? x #\/) (eq? x #\?)))))
        ;; owl regexps are extended. implement simple ones here later.
        ;; todo: the delimiter is actually arbitrary, at least in s?
-       (chars (star (get-byte-if (λ (x) (not (eq? x delim))))))
-       (skip (get-imm delim)))
+       (chars (star (get-byte-if (λ (x) (and (not (eq? x delim)) (not (eq? x #\newline)))))))
+       (skip (one-of (get-imm delim) (get-imm #\newline))))
       (tuple 
          'regex 
          (if (eq? delim #\?) 'up 'down)
@@ -207,6 +208,14 @@
       (let-parses
          ((val 
             (one-of
+               (let-parses
+                  ((skip (word "set" 'foo))
+                   (skip (imm #\space))
+                   (flag 
+                      (one-of
+                         (word "autocontext" 'autocontext)
+                         (word "autoclear" 'autoclear))))
+                  (tuple 'set flag #true))
                (let-parses
                   ((skip (imm #\u)))
                   (tuple 'undo))
@@ -477,6 +486,8 @@
 
 (define (valid-position? pos dot get-end)
    (cond
+      ((not pos)
+         #false)
       ((< pos 1)
          #false)
       ((<= pos dot)
@@ -545,18 +556,14 @@
       (values (cdr u) (cons (car u) d) (- l 1))))
 
 (define (weight x)
-   (write-bytes stdout
-      (cond
-         ((eq? x 'normal) '(27 #\[ #\m))
-         ((eq? x 'bright) '(27 #\[ #\1 #\m))
-         ((eq? x 'dim) '(27 #\[ #\2 #\m))
-         ((eq? x 'reverse) '(27 #\[ #\7 #\m)))))
+   (cond
+      ((eq? x 'normal) '(27 #\[ #\m))
+      ((eq? x 'bright) '(27 #\[ #\1 #\m))
+      ((eq? x 'dim) '(27 #\[ #\2 #\m))
+      ((eq? x 'reverse) '(27 #\[ #\7 #\m))))
 
-(define (clear-screen)
-   (write-bytes stdout
-      (list 
-         27 #\[ #\2 #\J
-         )))
+(define (clear-screen out)
+   (ilist 27 #\[ #\2 #\J out))
 
 (define (pad n)
    (cond
@@ -565,16 +572,18 @@
       ((< n 1000)   (str "  " n))
       (else (str " " n))))
 
-(define (render-row this)
-   (λ (l)
-      (if (equal? (car l) this)
-         (begin
-            (weight 'reverse)
-            (print (str (pad this) "    " (list->string (cdr l))))
-            (weight 'normal))
-         (print
-            (str (pad (car l))  "    "
-               (list->string (cdr l)))))))
+(define (render-row l out this)
+   (lets
+      ((pre (if (equal? this (car l)) (weight 'reverse) null))
+       (post (if (null? pre) null (weight 'normal))))
+      (append pre
+         (render (pad (car l)) 
+            (cons 32 
+               (foldr
+                  (λ (this tail)
+                     (cons this tail))
+                  (append post out)
+                  (cdr l)))))))
 
 (define (show-context u d l n)   
    (lets
@@ -582,14 +591,20 @@
          (force-ll (lzip cons (liota l -1 0) (take u n))))
        (down 
          (force-ll (lzip cons (liota (+ l 1) +1 (+ l n)) d))))
-      (for-each (render-row l)
-         (append (reverse up) down))))
+      (foldr
+         (λ (row out)
+            (render-row row (cons 10 out) l))
+         null (append (reverse up) down))))
+
+(define (maybe-clear env bs)
+   (if (get env 'autoclear #f)
+      (clear-screen bs)
+      bs))
 
 (define (maybe-context env u d l)
-   (if (get env 'autoclear #false)
-      (clear-screen))
-   (if (get env 'autocontext #false)
-      (show-context u d l 4)))
+   (lets ((bs (maybe-clear env (if (get env 'autocontext #false) (show-context u d l 8) null))))
+      (if (pair? bs)
+         (write-bytes stdout bs))))
 
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
@@ -602,7 +617,7 @@
       ((a es (uncons es #f))
        (last (getf env 'last))
        (env (put env 'last a)))
-      (print-to stderr a)
+      ;(print-to stderr a)
       (if a
          (tuple-case a
             ((append pos data)
@@ -714,6 +729,10 @@
                      (ed es (del env 'prompt) u d l))
                   (else
                      (ed es (put env 'prompt "*") u d l))))
+            ((set flag val)
+               (ed es 
+                  (put env flag val)
+                  u d l))
             ((write range path)
                (lets
                   ((lines (append (reverse u) d)) ;; ignore range for now
@@ -799,6 +818,18 @@
    (print-to stderr (str "?"))
    (recurse (forward-read ll)))
 
+(define (maybe-add-config ll)
+   (let ((home (getenv "HOME")))
+      (if home
+         (let ((port (open-input-file (str home "/.eirc"))))
+            (if port
+               (let ((data (force-ll (fd->exp-stream port (make-get-command) syntax-error-handler))))
+                  (if data 
+                     (append data ll)
+                     ll))
+               ll))
+         ll)))
+
 (define (start-ed dict args)
    (cond
       ((getf dict 'about)
@@ -816,7 +847,10 @@
             (foldr
                (λ (path out)
                   (cons (tuple 'edit path #true) out))
-               (fd->exp-stream stdin (make-get-command) syntax-error-handler)
+               (maybe-add-config
+                  (fd->exp-stream stdin 
+                     (make-get-command) 
+                     syntax-error-handler))
                args)
             dict null null 0))))
 
