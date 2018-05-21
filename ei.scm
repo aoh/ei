@@ -403,6 +403,11 @@
                (cond
                   ((null? u) ;; no current line, empty buffer
                      #false)
+                  ((null? rex) ;; empty regex, do last search if any
+                     (let ((old (getf env 'last-search)))
+                        (if old
+                           (eval-position env u d l old default)
+                           #false)))
                   ((and (eq? dir 'up)
                      (match-offset (cdr u) rex)) =>
                      (λ (off)
@@ -606,6 +611,18 @@
       (if (pair? bs)
          (write-bytes stdout bs))))
 
+(define (find-search last exp)
+   (if (tuple? exp)
+      (tuple-case exp
+         ((regex dir regex)
+            (if (null? regex)
+               last
+                     (begin
+                  exp)))
+         (else
+            (fold find-search last (tuple->list exp))))
+      last))
+   
 ;; dot is car of u, l is length of u
 (define (ed es env u d l)
    ;(if (not (= (length u) l))
@@ -616,8 +633,11 @@
    (lets 
       ((a es (uncons es #f))
        (last (getf env 'last))
-       (env (put env 'last a)))
+       (env (put env 'last a))
+       (env (put env 'last-search
+                (find-search (getf env 'last-search) a))))
       ;(print-to stderr a)
+      
       (if a
          (tuple-case a
             ((append pos data)
